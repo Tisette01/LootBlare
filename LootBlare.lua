@@ -16,7 +16,7 @@ local osRollCap = 99
 local tmogRollCap = 50
 
 local BUTTON_WIDTH = 32
-local BUTTON_COUNT = 4
+local BUTTON_COUNT = 5
 local BUTTON_PADING = 10
 local FONT_NAME = "Fonts\\FRIZQT__.TTF"
 local FONT_SIZE = 12
@@ -206,6 +206,7 @@ local function CreateItemRollFrame()
   CreateActionButton(frame, "MS", "Roll for Main Spec", 2, function() RandomRoll(1,msRollCap) end)
   CreateActionButton(frame, "OS", "Roll for Off Spec", 3, function() RandomRoll(1,osRollCap) end)
   CreateActionButton(frame, "TM", "Roll for Transmog", 4, function() RandomRoll(1,tmogRollCap) end)
+  CreateActionButton(frame, "PS", "Pass this item", 5, function() SendChatMessage("I'm pass this item!", "RAID", nil) end)
   frame:Hide()
 
   return frame
