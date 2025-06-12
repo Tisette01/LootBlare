@@ -1,8 +1,9 @@
-﻿local weird_vibes_mode = true
+local weird_vibes_mode = true
 local srRollMessages = {}
 local msRollMessages = {}
 local osRollMessages = {}
 local tmogRollMessages = {}
+local passRollMessages = {}
 local rollers = {}
 local isRolling = false
 local time_elapsed = 0
@@ -14,6 +15,7 @@ local srRollCap = 101
 local msRollCap = 100
 local osRollCap = 99
 local tmogRollCap = 50
+local passRollCap = 1
 
 local BUTTON_WIDTH = 32
 local BUTTON_COUNT = 5
@@ -38,6 +40,7 @@ local SR_TEXT_COLOR = "FFFF0000"
 local MS_TEXT_COLOR = "FFFFFF00"
 local OS_TEXT_COLOR = "FF00FF00"
 local TM_TEXT_COLOR = "FF00FFFF"
+local PS_TEXT_COLOR = "808080"
 
 local LB_PREFIX = "LootBlare"
 local LB_GET_DATA = "get data"
@@ -53,6 +56,7 @@ local function resetRolls()
   msRollMessages = {}
   osRollMessages = {}
   tmogRollMessages = {}
+  passRollMessages = {}
   rollers = {}
 end
 
@@ -86,6 +90,8 @@ local function colorMsg(message)
     textColor = OS_TEXT_COLOR
   elseif string.find(msg, "-"..tmogRollCap) then
     textColor = TM_TEXT_COLOR
+  elseif string.find(msg, "-"..passRollCap) then
+    textColor = PS_TEXT_COLOR
   end
 
   colored_msg = "|c" .. classColor .. "" .. message.roller .. "|r |c" .. textColor .. message_end .. "|r"
@@ -204,9 +210,9 @@ local function CreateItemRollFrame()
   CreateCloseButton(frame)
   CreateActionButton(frame, "SR", "Roll for Soft Reserve", 1, function() RandomRoll(1,srRollCap) end)
   CreateActionButton(frame, "MS", "Roll for Main Spec", 2, function() RandomRoll(1,msRollCap) end)
-  CreateActionButton(frame, "OS", "Roll for Off Spec", 3, function() RandomRoll(1,osRollCap) end)
+  CreateActionButton(frame, "OS/Alt", "Roll for Off Spec or Alt", 3, function() RandomRoll(1,osRollCap) end)
   CreateActionButton(frame, "TM", "Roll for Transmog", 4, function() RandomRoll(1,tmogRollCap) end)
-  CreateActionButton(frame, "PS", "Pass this item", 5, function() SendChatMessage("I'm pass this item!", "RAID", nil) end)
+  CreateActionButton(frame, "PS", "Pass this item", 5, function() RandomRoll(1,passRollCap) end)
   frame:Hide()
 
   return frame
@@ -375,7 +381,12 @@ local function UpdateTextArea(frame)
     text = text .. colorMsg(v) .. "\n"
     count = count + 1
   end
-
+    for i, v in ipairs(passRollMessages) do
+    if count >= 9 then break end
+    colored_msg = v.msg
+    text = text .. colorMsg(v) .. "\n"
+    count = count + 1
+  end
   frame.textArea:SetText(text)
 end
 
@@ -448,6 +459,8 @@ local function HandleChatMessage(event, message, sender)
         elseif maxRoll == tostring(tmogRollCap) then
           table.insert(tmogRollMessages, message)
         end
+        elseif maxRoll == tostring(passRollCap) then
+          table.insert(passRollMessages, message)
         UpdateTextArea(itemRollFrame)
       end
     end
