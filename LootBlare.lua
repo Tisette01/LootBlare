@@ -40,7 +40,7 @@ local SR_TEXT_COLOR = "FFFF0000"
 local MS_TEXT_COLOR = "FFFFFF00"
 local OS_TEXT_COLOR = "FF00FF00"
 local TM_TEXT_COLOR = "FF00FFFF"
-local PS_TEXT_COLOR = "808080"
+local PS_TEXT_COLOR = "FF808080"
 
 local LB_PREFIX = "LootBlare"
 local LB_GET_DATA = "get data"
@@ -71,6 +71,9 @@ local function sortRolls()
     return a.roll > b.roll
   end)
   table.sort(tmogRollMessages, function(a, b)
+    return a.roll > b.roll
+  end)
+  table.sort(passRollMessages, function(a, b)
     return a.roll > b.roll
   end)
 end
@@ -381,7 +384,7 @@ local function UpdateTextArea(frame)
     text = text .. colorMsg(v) .. "\n"
     count = count + 1
   end
-    for i, v in ipairs(passRollMessages) do
+  for i, v in ipairs(passRollMessages) do
     if count >= 9 then break end
     colored_msg = v.msg
     text = text .. colorMsg(v) .. "\n"
@@ -458,9 +461,9 @@ local function HandleChatMessage(event, message, sender)
           table.insert(osRollMessages, message)
         elseif maxRoll == tostring(tmogRollCap) then
           table.insert(tmogRollMessages, message)
-        end
         elseif maxRoll == tostring(passRollCap) then
           table.insert(passRollMessages, message)
+        end
         UpdateTextArea(itemRollFrame)
       end
     end
