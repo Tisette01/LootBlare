@@ -1,25 +1,23 @@
-local weird_vibes_mode = true
-local srRollMessages = {}
-local msRollMessages = {}
-local osRollMessages = {}
-local tmogRollMessages = {}
-local passRollMessages = {}
-local rollers = {}
-local isRolling = false
-local time_elapsed = 0
-local item_query = 0.5
-local times = 5
-local discover = CreateFrame("GameTooltip", "CustomTooltip1", UIParent, "GameTooltipTemplate")
-local masterLooter = nil
-local srRollCap = 101
-local msRollCap = 100
-local osRollCap = 99
-local tmogRollCap = 50
-local passRollCap = 1
+﻿local state = {
+  weird_vibes_mode = true,
+  rollMessages = {},
+  rollers = {},
+  isRolling = false,
+  time_elapsed = 0,
+  item_query = 0.5,
+  times = 5,
+  discover = CreateFrame("GameTooltip", "CustomTooltip1", UIParent, "GameTooltipTemplate"),
+  masterLooter = nil,
+  srRollCap = 101,
+  msRollCap = 100,
+  osRollCap = 99,
+  tmogRollCap = 50,
+  MLRollDuration = 15,
+}
 
 local BUTTON_WIDTH = 32
-local BUTTON_COUNT = 5
-local BUTTON_PADING = 10
+local BUTTON_COUNT = 4
+local BUTTON_PADING = 5
 local FONT_NAME = "Fonts\\FRIZQT__.TTF"
 local FONT_SIZE = 12
 local FONT_OUTLINE = "OUTLINE"
@@ -34,13 +32,15 @@ local RAID_CLASS_COLORS = {
   ["Warlock"] = "FF9482C9",
   ["Paladin"] = "FFF58CBA",
 }
-local ADDON_TEXT_COLOR= "FFEDD8BB"
-local DEFAULT_TEXT_COLOR = "FFFFFF00"
-local SR_TEXT_COLOR = "FFFF0000"
-local MS_TEXT_COLOR = "FFFFFF00"
-local OS_TEXT_COLOR = "FF00FF00"
-local TM_TEXT_COLOR = "FF00FFFF"
-local PS_TEXT_COLOR = "FF808080"
+local colors = {
+  ADDON_TEXT_COLOR = "FFEDD8BB",
+  DEFAULT_TEXT_COLOR = "FFFFFF00",
+  SR_TEXT_COLOR = "ffe5302d",
+  MS_TEXT_COLOR = "FFFFFF00",
+  OS_TEXT_COLOR = "FF00FF00",
+  TM_TEXT_COLOR = "FF00FFFF",
+  OTHER_TEXT_COLOR = "ffff80be",
+}
 
 local LB_PREFIX = "LootBlare"
 local LB_GET_DATA = "get data"
@@ -48,57 +48,71 @@ local LB_SET_ML = "ML set to "
 local LB_SET_ROLL_TIME = "Roll time set to "
 
 local function lb_print(msg)
-  DEFAULT_CHAT_FRAME:AddMessage("|c" .. ADDON_TEXT_COLOR .. "LootBlare: " .. msg .. "|r")
+  DEFAULT_CHAT_FRAME:AddMessage("|c" .. colors.ADDON_TEXT_COLOR .. "LootBlare: " .. msg .. "|r")
 end
 
 local function resetRolls()
-  srRollMessages = {}
-  msRollMessages = {}
-  osRollMessages = {}
-  tmogRollMessages = {}
-  passRollMessages = {}
-  rollers = {}
+  state.rollMessages = {}
+  state.rollers = {}
 end
 
 local function sortRolls()
-  table.sort(srRollMessages, function(a, b)
-    return a.roll > b.roll
-  end)
-  table.sort(msRollMessages, function(a, b)
-    return a.roll > b.roll
-  end)
-  table.sort(osRollMessages, function(a, b)
-    return a.roll > b.roll
-  end)
-  table.sort(tmogRollMessages, function(a, b)
-    return a.roll > b.roll
-  end)
-  table.sort(passRollMessages, function(a, b)
+  table.sort(state.rollMessages, function(a, b)
+    -- Primary grouping: All entries with minRoll==1 come first.
+    if a.minRoll == 1 and b.minRoll ~= 1 then
+      return true
+    elseif a.minRoll ~= 1 and b.minRoll == 1 then
+      return false
+    end
+
+    -- Now both entries are in the same overall minRoll group.
+
+    -- Secondary: sort by maxRoll descending.
+    if a.maxRoll ~= b.maxRoll then
+      return a.maxRoll > b.maxRoll
+    end
+
+    -- Tertiary: if we are in the non-minRoll==1 group, sort by minRoll descending.
+    if a.minRoll ~= b.minRoll then
+      return a.minRoll > b.minRoll
+    end
+
+    -- Finally: sort by the actual roll descending.
     return a.roll > b.roll
   end)
 end
 
-local function colorMsg(message)
-  msg = message.msg
-  class = message.class
-  _,_,_, message_end = string.find(msg, "(%S+)%s+(.+)")
-  classColor = RAID_CLASS_COLORS[class]
-  textColor = DEFAULT_TEXT_COLOR
+local function formatMsg(message)
+  local msg = message.msg
+  local class = message.class
+  local classColor = RAID_CLASS_COLORS[class]
+  local textColor = colors.DEFAULT_TEXT_COLOR
 
-  if string.find(msg, "-"..srRollCap) then
-    textColor = SR_TEXT_COLOR
-  elseif string.find(msg, "-"..msRollCap) then
-    textColor = MS_TEXT_COLOR
-  elseif string.find(msg, "-"..osRollCap) then
-    textColor = OS_TEXT_COLOR
-  elseif string.find(msg, "-"..tmogRollCap) then
-    textColor = TM_TEXT_COLOR
-  elseif string.find(msg, "-"..passRollCap) then
-    textColor = PS_TEXT_COLOR
+  if message.maxRoll > state.msRollCap then
+    textColor = colors.SR_TEXT_COLOR
+  elseif message.maxRoll == state.msRollCap then
+    textColor = colors.MS_TEXT_COLOR
+  elseif message.maxRoll == state.osRollCap then
+    textColor = colors.OS_TEXT_COLOR
+  elseif message.maxRoll < state.osRollCap then
+    textColor = colors.TM_TEXT_COLOR
   end
 
-  colored_msg = "|c" .. classColor .. "" .. message.roller .. "|r |c" .. textColor .. message_end .. "|r"
-  return colored_msg
+  local c_class = format("|c%s%-12s|r", classColor, message.roller)
+  local max_or_special
+  if message.minRoll == 1 and message.maxRoll == state.srRollCap then
+    max_or_special = " SR"
+  elseif message.minRoll == 1 and message.maxRoll == state.msRollCap then
+    max_or_special = " MS"
+  elseif message.minRoll == 1 and message.maxRoll == state.osRollCap then
+    max_or_special = " OS"
+  elseif message.minRoll == 1 and message.maxRoll == state.tmogRollCap then
+    max_or_special = " TM"
+  end
+  local c_min = message.minRoll == 1 and "" or ("|cFFFF0000" .. message.minRoll .. "|c" .. textColor .. "-")
+  local c_end = max_or_special or format("(%s%d)", c_min, tostring(message.maxRoll))
+
+  return format("%s|c%s%-3s%s|r", c_class, textColor, message.roll, c_end)
 end
 
 local function tsize(t)
@@ -109,9 +123,17 @@ local function tsize(t)
   if c > 0 then return c else return nil end
 end
 
+local function IsInRaid()
+  return GetNumRaidMembers() > 0
+end
+
+local function IsInGroup()
+  return GetNumPartyMembers() + GetNumRaidMembers() > 0
+end
+
 local function CheckItem(link)
-  discover:SetOwner(UIParent, "ANCHOR_PRESERVE")
-  discover:SetHyperlink(link)
+  state.discover:SetOwner(UIParent, "ANCHOR_PRESERVE")
+  state.discover:SetHyperlink(link)
 
   if discoverTextLeft1 and discoverTooltipTextLeft1:IsVisible() then
     local name = discoverTooltipTextLeft1:GetText()
@@ -193,7 +215,7 @@ end
 
 local function CreateItemRollFrame()
   local frame = CreateFrame("Frame", "ItemRollFrame", UIParent)
-  frame:SetWidth(200) -- Adjust size as needed
+  frame:SetWidth(165) -- Adjust size as needed
   frame:SetHeight(220)
   frame:SetPoint("CENTER",UIParent,"CENTER",0,0) -- Position at center of the parent frame
   frame:SetBackdrop({
@@ -211,11 +233,10 @@ local function CreateItemRollFrame()
   frame:SetScript("OnDragStart", function () frame:StartMoving() end)
   frame:SetScript("OnDragStop", function () frame:StopMovingOrSizing() end)
   CreateCloseButton(frame)
-  CreateActionButton(frame, "SR", "Roll for Soft Reserve", 1, function() RandomRoll(1,srRollCap) end)
-  CreateActionButton(frame, "MS", "Roll for Main Spec", 2, function() RandomRoll(1,msRollCap) end)
-  CreateActionButton(frame, "OS/Alt", "Roll for Off Spec or Alt", 3, function() RandomRoll(1,osRollCap) end)
-  CreateActionButton(frame, "TM", "Roll for Transmog", 4, function() RandomRoll(1,tmogRollCap) end)
-  CreateActionButton(frame, "PS", "Pass this item", 5, function() RandomRoll(1,passRollCap) end)
+  CreateActionButton(frame, "SR", "Roll for Soft Reserve", 1, function() RandomRoll(1,state.srRollCap) end)
+  CreateActionButton(frame, "MS", "Roll for Main Spec", 2, function() RandomRoll(1,state.msRollCap) end)
+  CreateActionButton(frame, "OS/Alt", "Roll for Off Spec or Alt", 3, function() RandomRoll(1,state.osRollCap) end)
+  CreateActionButton(frame, "TM", "Roll for Transmog", 4, function() RandomRoll(1,state.tmogRollCap) end)
   frame:Hide()
 
   return frame
@@ -243,7 +264,7 @@ local function InitItemInfo(frame)
 
   -- Create a FontString for the item name
   local name = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  name:SetPoint("TOP", icon, "BOTTOM", 0, -10)
+  name:SetPoint("TOP", icon, "BOTTOM", 0, -2)
 
   frame.icon = icon
   frame.iconButton = iconButton
@@ -304,24 +325,25 @@ end
 
 local function ShowFrame(frame,duration,item)
   frame:SetScript("OnUpdate", function()
-    time_elapsed = time_elapsed + arg1
-    item_query = item_query - arg1
-    if frame.timerText then frame.timerText:SetText(format("%.1f", duration - time_elapsed)) end
-    if time_elapsed >= duration then
+    state.time_elapsed = state.time_elapsed + arg1
+    state.item_query = state.item_query - arg1
+    local delta = duration - state.time_elapsed
+    if frame.timerText then frame.timerText:SetText(format("%.1f", delta > 0 and delta or 0)) end
+    if state.time_elapsed >= max(duration,FrameShownDuration) then
       frame.timerText:SetText("0.0")
       frame:SetScript("OnUpdate", nil)
-      time_elapsed = 0
-      item_query = 1.5
-      times = 3
+      state.time_elapsed = 0
+      state.item_query = 1.5
+      state.times = 3
       rollMessages = {}
-      isRolling = false
-      if FrameAutoClose and not (masterLooter == UnitName("player")) then frame:Hide() end
+      state.isRolling = false
+      if FrameAutoClose and not (state.masterLooter == UnitName("player")) then frame:Hide() end
     end
-    if times > 0 and item_query < 0 and not CheckItem(item) then
-      times = times - 1
+    if state.times > 0 and state.item_query < 0 and not CheckItem(item) then
+      state.times = state.times - 1
     else
       if not SetItemInfo(itemRollFrame,item) then frame:Hide() end
-      times = 5
+      state.times = 5
     end
   end)
   frame:Show()
@@ -329,8 +351,10 @@ end
 
 local function CreateTextArea(frame)
   local textArea = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  textArea:SetHeight(150) -- Size of the icon
-  textArea:SetPoint("TOP", frame, "TOP", 0, -80)
+  textArea:SetFont("Interface\\AddOns\\LootBlare\\MonaspaceNeonFrozen-Regular.ttf", 12, "")
+  textArea:SetHeight(150)
+  -- textArea:SetWidth(150)
+  textArea:SetPoint("TOPLEFT", frame, "TOPLEFT", 5, -70)
   textArea:SetJustifyH("LEFT")
   textArea:SetJustifyV("TOP")
 
@@ -360,36 +384,13 @@ local function UpdateTextArea(frame)
 
   sortRolls()
 
-  for i, v in ipairs(srRollMessages) do
-    if count >= 5 then break end
-    colored_msg = v.msg
-    text = text .. colorMsg(v) .. "\n"
-    count = count + 1
-  end
-  for i, v in ipairs(msRollMessages) do
-    if count >= 6 then break end
-    colored_msg = v.msg
-    text = text .. colorMsg(v) .. "\n"
-    count = count + 1
-  end
-  for i, v in ipairs(osRollMessages) do
-    if count >= 7 then break end
-    colored_msg = v.msg
-    text = text .. colorMsg(v) .. "\n"
-    count = count + 1
-  end
-  for i, v in ipairs(tmogRollMessages) do
-    if count >= 8 then break end
-    colored_msg = v.msg
-    text = text .. colorMsg(v) .. "\n"
-    count = count + 1
-  end
-  for i, v in ipairs(passRollMessages) do
+  for i, v in ipairs(state.rollMessages) do
     if count >= 9 then break end
     colored_msg = v.msg
-    text = text .. colorMsg(v) .. "\n"
+    text = text .. formatMsg(v) .. "\n"
     count = count + 1
   end
+
   frame.textArea:SetText(text)
 end
 
@@ -402,6 +403,7 @@ local function ExtractItemLinksFromMessage(message)
   return itemLinks
 end
 
+-- this isn't quite right, should just check if you are ML, since it can only check you and your party anyway rather than the whole raid
 local function IsSenderMasterLooter(sender)
   local lootMethod, masterLooterPartyID = GetLootMethod()
   if lootMethod == "master" and masterLooterPartyID then
@@ -416,122 +418,162 @@ local function IsSenderMasterLooter(sender)
   return false
 end
 
-local function HandleChatMessage(event, message, sender)
-  if (event == "CHAT_MSG_RAID" or event == "CHAT_MSG_RAID_LEADER") then
-    local _,_,duration = string.find(message, "Roll time set to (%d+) seconds")
-    duration = tonumber(duration)
-    if duration and duration ~= FrameShownDuration then
-      FrameShownDuration = duration
-      -- The players get the new duration from the master looter after the first rolls
-      lb_print("Rolling duration set to " .. FrameShownDuration .. " seconds. (set by Master Looter)")
-    end
-  elseif event == "CHAT_MSG_LOOT" then
-    -- Hide frame for masterlooter when loot is awarded
-    if not ItemRollFrame:IsVisible() or masterLooter ~= UnitName("player") then return end
+-- todo, test this
+local function PlayerIsML()
+  local lootMethod, masterLooterPartyID = GetLootMethod()
+  return lootMethod == "master" and masterLooterPartyID and (masterLooterPartyID == 0)
+end
 
-    local _,_,who = string.find(message, "^(%a+) receive.? loot:")
-    local links = ExtractItemLinksFromMessage(message)
-
-    if who and tsize(links) == 1 then
-      if this.itemLink == links[1] then
-        resetRolls()
-        this:Hide()
-      end
-    end
-  elseif event == "CHAT_MSG_SYSTEM" then
-    local _,_, newML = string.find(message, "(%S+) is now the loot master")
-    if newML then
-      masterLooter = newML
-      playerName = UnitName("player")
-      -- if the player is the new master looter, announce the roll time
-      if newML == playerName then
-        SendAddonMessage(LB_PREFIX, LB_SET_ROLL_TIME .. FrameShownDuration .. " seconds", "RAID")
-      end
-    elseif isRolling and string.find(message, "rolls") and string.find(message, "(%d+)") then
-      local _,_,roller, roll, minRoll, maxRoll = string.find(message, "(%S+) rolls (%d+) %((%d+)%-(%d+)%)")
-      if roller and roll and rollers[roller] == nil then
-        roll = tonumber(roll)
-        rollers[roller] = 1
-        message = { roller = roller, roll = roll, msg = message, class = GetClassOfRoller(roller) }
-        if maxRoll == tostring(srRollCap) then
-          table.insert(srRollMessages, message)
-        elseif maxRoll == tostring(msRollCap) then
-          table.insert(msRollMessages, message)
-        elseif maxRoll == tostring(osRollCap) then
-          table.insert(osRollMessages, message)
-        elseif maxRoll == tostring(tmogRollCap) then
-          table.insert(tmogRollMessages, message)
-        elseif maxRoll == tostring(passRollCap) then
-          table.insert(passRollMessages, message)
-        end
-        UpdateTextArea(itemRollFrame)
-      end
-    end
-
-  elseif event == "CHAT_MSG_RAID_WARNING" and sender == masterLooter then
-    local links = ExtractItemLinksFromMessage(message)
-    if tsize(links) == 1 then
-      -- interaction with other looting addons
-      if string.find(message, "^No one has nee") or
-        -- prevents reblaring on loot award
-        string.find(message,"has been sent to") or
-        string.find(message, " received ") then
-        return
-      end
-      resetRolls()
-      UpdateTextArea(itemRollFrame)
-      time_elapsed = 0
-      isRolling = true
-      ShowFrame(itemRollFrame,FrameShownDuration,links[1])
-    end
-  elseif event == "PLAYER_ENTERING_WORLD" then
-    SendAddonMessage(LB_PREFIX, LB_GET_DATA, "RAID") -- fetch ML info
-  elseif event == "ADDON_LOADED"then
-    if FrameShownDuration == nil then FrameShownDuration = 15 end
-    if FrameAutoClose == nil then FrameAutoClose = true end
-    if IsSenderMasterLooter(UnitName("player")) then
-      SendAddonMessage(LB_PREFIX, LB_SET_ML .. UnitName("player"), "RAID")
-      SendAddonMessage(LB_PREFIX, LB_SET_ROLL_TIME .. FrameShownDuration, "RAID")
-      itemRollFrame:UnregisterEvent("ADDON_LOADED")
-    else
-      SendAddonMessage(LB_PREFIX, LB_GET_DATA, "RAID")
-    end
-  elseif event == "CHAT_MSG_ADDON" and arg1 == LB_PREFIX then
-    local prefix, message, channel, sender = arg1, arg2, arg3, arg4
-
-    -- Someone is asking for the master looter and his roll time
-    if message == LB_GET_DATA and IsSenderMasterLooter(UnitName("player")) then
-      masterLooter = UnitName("player")
-      SendAddonMessage(LB_PREFIX, LB_SET_ML .. masterLooter, "RAID")
-      SendAddonMessage(LB_PREFIX, LB_SET_ROLL_TIME .. FrameShownDuration, "RAID")
-    end
-
-    -- Someone is setting the master looter
-    if string.find(message, LB_SET_ML) then
-      local _,_, newML = string.find(message, "ML set to (%S+)")
-      masterLooter = newML
-    end
-    -- Someone is setting the roll time
-    if string.find(message, LB_SET_ROLL_TIME) then
-      local _,_,duration = string.find(message, "Roll time set to (%d+)")
-      duration = tonumber(duration)
-      if duration and duration ~= FrameShownDuration then
-        FrameShownDuration = duration
-        lb_print("Roll time set to " .. FrameShownDuration .. " seconds.")
-      end
+local pendingRequest, requestDelay = false, 0
+local function RequestML(delay)
+  pendingRequest = true
+  requestDelay   = delay or 3.0
+end
+local delayFrame = CreateFrame("Frame")
+delayFrame:SetScript("OnUpdate", function()
+  local elapsed = arg1
+  if not pendingRequest then return end
+  requestDelay = requestDelay - elapsed
+  if requestDelay<=0 then
+    pendingRequest = false
+    if IsInGroup() then
+      SendAddonMessage(LB_PREFIX, LB_GET_DATA, IsInRaid() and "RAID" or "PARTY")
     end
   end
+end)
+
+function itemRollFrame:CHAT_MSG_LOOT(message)
+  -- Hide frame for masterlooter when loot is awarded
+  if not ItemRollFrame:IsVisible() or state.masterLooter ~= UnitName("player") then return end
+
+  local _,_,who = string.find(message, "^(%a+) receive.? loot:")
+  local links = ExtractItemLinksFromMessage(message)
+
+  if who and tsize(links) == 1 then
+    if this.itemLink == links[1] then
+      resetRolls()
+      this:Hide()
+    end
+  end
+end
+
+function itemRollFrame:CHAT_MSG_SYSTEM(message)
+  if state.isRolling and string.find(message, "rolls") and string.find(message, "(%d+)") then
+    local _,_,roller, roll, minRoll, maxRoll = string.find(message, "(%S+) rolls (%d+) %((%d+)%-(%d+)%)")
+    if roller and roll and (state.rollers[roller] == nil or LB_DEBUG) then
+      roll = tonumber(roll)
+      minRoll = tonumber(minRoll)
+      maxRoll = tonumber(maxRoll)
+      state.rollers[roller] = 1
+      message = { roller = roller, roll = roll, minRoll = minRoll, maxRoll = maxRoll, msg = message, class = GetClassOfRoller(roller) }
+
+      table.insert(state.rollMessages, message)
+      UpdateTextArea(itemRollFrame)
+    end
+  end
+end
+
+function itemRollFrame:CHAT_MSG_RAID_WARNING(message,sender)
+  if sender ~= state.masterLooter then return end
+
+  local links = ExtractItemLinksFromMessage(message)
+  if tsize(links) == 1 then
+    -- interaction with other looting addons
+    if string.find(message, "^No one has nee") or
+      -- prevents reblaring on loot award
+      string.find(message,"has been sent to") or
+      string.find(message, " received ") then
+      return
+    end
+    resetRolls()
+    UpdateTextArea(itemRollFrame)
+    state.time_elapsed = 0
+    state.isRolling = true
+    ShowFrame(itemRollFrame,state.MLRollDuration,links[1])
+  end
+end
+
+function itemRollFrame:SendML(masterlooter)
+  SendAddonMessage(LB_PREFIX, LB_SET_ML .. masterlooter, IsInRaid() and "RAID" or "PARTY")
+  SendAddonMessage(LB_PREFIX, LB_SET_ROLL_TIME .. FrameShownDuration, IsInRaid() and "RAID" or "PARTY")
+end
+
+function itemRollFrame:CHAT_MSG_ADDON(prefix,message,channel,sender)
+  local player = UnitName("player")
+
+  -- Someone is asking for the master looter and his roll time
+  if message == LB_GET_DATA and IsSenderMasterLooter(player) then
+    self:SendML(player)
+    return
+  end
+
+  -- Someone is setting the master looter
+  if string.find(message, LB_SET_ML) then
+    local _,_, newML = string.find(message, "ML set to (%S+)")
+    if not state.masterLooter or (state.masterLooter and (state.masterLooter ~= newML)) then
+      lb_print("Masterlooter set to |cFF00FF00" .. newML .. "|r")
+    end
+    state.masterLooter = newML
+    return
+  end
+
+  -- Someone is setting the roll time
+  if string.find(message, LB_SET_ROLL_TIME) then
+    local _,_,duration = string.find(message, "Roll time set to (%d+)")
+    duration = tonumber(duration)
+    if duration and duration ~= state.MLRollDuration then
+      state.MLRollDuration = duration
+      if not IsSenderMasterLooter(player) then
+        local roll_string = "Roll time set to " .. state.MLRollDuration .. " seconds by Master Looter."
+        if state.MLRollDuration ~= FrameShownDuration then
+          roll_string = roll_string .. " Your display time is " .. FrameShownDuration .." seconds."
+        end
+        lb_print(roll_string)
+      end
+    end
+    return
+  end
+end
+
+function itemRollFrame:RAID_ROSTER_UPDATE()
+  RequestML(0.5)
+end
+
+function itemRollFrame:PARTY_MEMBERS_CHANGED()
+  RequestML(0.5)
+end
+
+function itemRollFrame:PLAYER_ENTERING_WORLD()
+  RequestML(10)
+end
+
+function itemRollFrame:PARTY_LOOT_METHOD_CHANGED()
+  RequestML(0.5)
+end
+
+function itemRollFrame:ADDON_LOADED(addon)
+  if addon ~= "LootBlare" then return end
+
+  if FrameShownDuration == nil then FrameShownDuration = 15 end
+  if FrameAutoClose == nil then FrameAutoClose = true end
+  state.MLRollDuration = FrameShownDuration
 end
 
 itemRollFrame:RegisterEvent("ADDON_LOADED")
 itemRollFrame:RegisterEvent("CHAT_MSG_SYSTEM")
 itemRollFrame:RegisterEvent("CHAT_MSG_RAID_WARNING")
-itemRollFrame:RegisterEvent("CHAT_MSG_RAID")
-itemRollFrame:RegisterEvent("CHAT_MSG_RAID_LEADER")
+-- itemRollFrame:RegisterEvent("CHAT_MSG_RAID")
+-- itemRollFrame:RegisterEvent("CHAT_MSG_RAID_LEADER")
 itemRollFrame:RegisterEvent("CHAT_MSG_ADDON")
 itemRollFrame:RegisterEvent("CHAT_MSG_LOOT")
+itemRollFrame:RegisterEvent("RAID_ROSTER_UPDATE")
+itemRollFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
+itemRollFrame:RegisterEvent("PARTY_LOOT_METHOD_CHANGED")
 itemRollFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-itemRollFrame:SetScript("OnEvent", function () HandleChatMessage(event,arg1,arg2) end)
+-- itemRollFrame:SetScript("OnEvent", function () HandleChatMessage(event,arg1,arg2) end)
+itemRollFrame:SetScript("OnEvent", function ()
+  itemRollFrame[event](itemRollFrame,arg1,arg2,arg3,arg4,arg5,arg6,arg7,arg8,arg9)
+end)
 
 -- Register the slash command
 SLASH_LOOTBLARE1 = '/lootblare'
@@ -540,21 +582,21 @@ SLASH_LOOTBLARE2 = '/lb'
 -- Command handler
 SlashCmdList["LOOTBLARE"] = function(msg)
   msg = string.lower(msg)
-  if msg == "" then
-    if itemRollFrame:IsVisible() then
-      itemRollFrame:Hide()
-    else
-      itemRollFrame:Show()
-    end
-  elseif msg == "help" then
-    lb_print("LootBlare is a simple addon that displays and sort item rolls in a frame.")
-    lb_print("Type /lb time <seconds> to set the duration the frame is shown. This value will be automatically set by the master looter after the first rolls.")
+  -- if msg == "" then
+    -- if itemRollFrame:IsVisible() then
+      -- itemRollFrame:Hide()
+    -- else
+      -- itemRollFrame:Show()
+    -- end
+  if msg == "help" or msg == "" then
+    lb_print("LootBlare " .. GetAddOnMetadata("LootBlare","Version") .. " is a simple addon that displays sorted item rolls in a frame.")
+    lb_print("Type /lb time <seconds> to set the duration the frame is shown.")
     lb_print("Type /lb autoClose on/off to enable/disable auto closing the frame after the time has elapsed.")
     lb_print("Type /lb settings to see the current settings.")
   elseif msg == "settings" then
     lb_print("Frame shown duration: " .. FrameShownDuration .. " seconds.")
     lb_print("Auto closing: " .. (FrameAutoClose and "on" or "off"))
-    lb_print("Master Looter: " .. (masterLooter or "unknown"))
+    lb_print("Master Looter: " .. (state.masterLooter or "unknown"))
   elseif string.find(msg, "time") then
     local _,_,newDuration = string.find(msg, "time (%d+)")
     newDuration = tonumber(newDuration)
@@ -562,7 +604,7 @@ SlashCmdList["LOOTBLARE"] = function(msg)
       FrameShownDuration = newDuration
       lb_print("Roll time set to " .. newDuration .. " seconds.")
       if IsSenderMasterLooter(UnitName("player")) then
-        SendAddonMessage(LB_PREFIX, LB_SET_ROLL_TIME .. newDuration, "RAID")
+        SendAddonMessage(LB_PREFIX, LB_SET_ROLL_TIME .. newDuration, IsInRaid() and "RAID" or "PARTY")
       end
     else
       lb_print("Invalid duration. Please enter a number greater than 0.")
